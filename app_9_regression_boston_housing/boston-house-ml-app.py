@@ -16,7 +16,6 @@ st.write('---')
 boston = datasets.load_boston()
 X = pd.DataFrame(boston.data, columns=boston.feature_names)
 Y = pd.DataFrame(boston.target, columns=["MEDV"])
-
 # Sidebar
 # Header of Specify Input Parameters
 st.sidebar.header('Specify Input Parameters')
