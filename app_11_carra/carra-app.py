@@ -5,64 +5,100 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 import yfinance as yf
+import sqlite3
+from datetime import datetime
+from datetime import timedelta
+from collections import OrderedDict
 
-st.title('CARRA throughputs')
+st.title('CARRA throughput')
 
 st.markdown("""
 This app plots the CARRA data
-* **Python libraries:** base64, pandas, streamlit, numpy, matplotlib, seaborn
-* **Data source: sqlite file from CARRA
+* Data source: SQLite file from CARRA
 """)
 
-st.sidebar.header('User Input Features')
+st.sidebar.header('Select stream')
 
-# Web scraping of S&P 500 data
-#
-@st.cache
-def load_data():
-    url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
-    html = pd.read_html(url, header = 0)
-    df = html[0]
+# Read the sqlite file
+def load_data(ifile="/home/cap/data/from_ecmwf/dbases_harmon/carra_daily_logs.db",tname="daily_logs"):
+    conn=sqlite3.connect(ifile)
+    sql_comm = "SELECT * FROM "+tname
+    df = pd.read_sql(sql_comm, conn)
     return df
 
 df = load_data()
-sector = df.groupby('GICS Sector')
+sector = df.groupby('stream')
 
 # Sidebar - Sector selection
-sorted_sector_unique = sorted( df['GICS Sector'].unique() )
-selected_sector = st.sidebar.multiselect('Sector', sorted_sector_unique, sorted_sector_unique)
+sorted_sector_unique = sorted( df['stream'].unique() )
+selected_sector = st.sidebar.multiselect('Stream', sorted_sector_unique, sorted_sector_unique)
 
 # Filtering data
-df_selected_sector = df[ (df['GICS Sector'].isin(selected_sector)) ]
+df_selected_sector = df[ (df['stream'].isin(selected_sector)) ]
 
-st.header('Display Companies in Selected Sector')
+st.header('Display streams')
 st.write('Data Dimension: ' + str(df_selected_sector.shape[0]) + ' rows and ' + str(df_selected_sector.shape[1]) + ' columns.')
-st.dataframe(df_selected_sector)
+st.dataframe(df_selected_sector[["stream","yyyymmdd","simdate"]])
 
-# Download S&P500 data
-# https://discuss.streamlit.io/t/how-to-download-file-in-streamlit/1806
-def filedownload(df):
-    csv = df.to_csv(index=False)
-    b64 = base64.b64encode(csv.encode()).decode()  # strings <-> bytes conversions
-    href = f'<a href="data:file/csv;base64,{b64}" download="SP500.csv">Download CSV File</a>'
-    return href
 
-st.markdown(filedownload(df_selected_sector), unsafe_allow_html=True)
+def read_stream(stream,year,data):
+    '''
+    Count days present for all days,
+    starting at the beginning of each year
+    Return a data frame with dates and number of days produced on each day
+    '''
+    if stream == "carra_pan":
+        startDate= datetime(2021,5,10) #Start of the counting
+        endDate=datetime.today()
+    elif stream != "carra_pan" and year == 2021:
+        startDate= datetime(year,1,1) #Start of the counting
+        endDate=datetime.today()
+    elif stream != "carra_pan" and year != 2021:
+        startDate= datetime(year,1,1) #Start of the counting
+        endDate= datetime(year,12,31)
+    #Set array of all dates I want to searh for
+    dates = []
+    dates = [startDate + timedelta(days=x) for x in range(0, (endDate-startDate).days+1)]
+    #Temporary dict to collect all dates
+    collect_data=OrderedDict()
+    collect_data["Ndays"]=[]
+    collect_data["Dates"] = []
 
-# https://pypi.org/project/yfinance/
+    if stream == "All": #Go through all streams, ignore stream name in selection
+        for date in dates:
+            this_date = datetime.strftime(date,"%Y/%m/%d")
+            count = data[data.yyyymmdd == this_date].drop_duplicates(subset="simdate",keep="last").shape[0]
+            collect_data["Dates"].append(date)
+            collect_data["Ndays"].append(count)
+    elif "," in stream: #This is a list of streams. Go through selected streams
+        for date in dates:
+            this_date = datetime.strftime(date,"%Y/%m/%d")
+            for this_stream in stream.split(","):
+                count = data[(data.yyyymmdd == this_date) & (data.stream == this_stream)].drop_duplicates(subset="simdate",keep="last").shape[0]
+                collect_data["Ndays"].append(count)
+                collect_data["Dates"].append(date)
 
-data = yf.download(
-        tickers = list(df_selected_sector[:10].Symbol),
-        period = "ytd",
-        interval = "1d",
-        group_by = 'ticker',
-        auto_adjust = True,
-        prepost = True,
-        threads = True,
-        proxy = None
-    )
+    else: #Consider the stream name in counting
+        for date in dates:
+            this_date = datetime.strftime(date,"%Y/%m/%d")
+            count = data[(data.yyyymmdd == this_date) & (data.stream == stream)].drop_duplicates(subset="simdate",keep="last").shape[0]
+            collect_data["Ndays"].append(count)
+            collect_data["Dates"].append(date)
+    data_count = pd.DataFrame({"Dates": collect_data["Dates"],
+                                "Ndays": collect_data["Ndays"]})
+    data_count = data_count.astype({"Ndays": int})
+    return data_count
+def plot_domain(data,stream):
+    #print(f"Checking stream {stream}")
+    #figName = args.output_file
+    #fig = plt.figure()
+    dates=data['Dates'].tolist()
+    #ax = plt.subplot(111)
+    plt.bar(data['Dates'].values,data['Ndays'].values,edgecolor=['k']*len(dates))
+    #ax.xaxis_date()
 
-# Plot Closing Price of Query Symbol
+
+
 def price_plot(symbol):
   df = pd.DataFrame(data[symbol].Close)
   df['Date'] = df.index
@@ -77,6 +113,7 @@ def price_plot(symbol):
 num_company = st.sidebar.slider('Number of Companies', 1, 5)
 
 if st.button('Show Plots'):
-    st.header('Stock Closing Price')
-    for i in list(df_selected_sector.Symbol)[:num_company]:
-        price_plot(i)
+    st.header('Throughput')
+    for stream in df_selected_sector.stream:
+        data = read_stream(stream,2021,df)
+        plot_domain(stream,data)
