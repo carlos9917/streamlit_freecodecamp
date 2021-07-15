@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import base64
 import matplotlib.pyplot as plt
+import matplotlib.dates as md
+from matplotlib.ticker import MaxNLocator
 import seaborn as sns
 import numpy as np
 import yfinance as yf
@@ -31,14 +33,15 @@ sector = df.groupby('stream')
 
 # Sidebar - Sector selection
 sorted_sector_unique = sorted( df['stream'].unique() )
-selected_sector = st.sidebar.multiselect('Stream', sorted_sector_unique, sorted_sector_unique)
+selected_stream = st.sidebar.multiselect('Stream', sorted_sector_unique, sorted_sector_unique)
+
 
 # Filtering data
-df_selected_sector = df[ (df['stream'].isin(selected_sector)) ]
+df_selected_stream = df[ (df['stream'].isin(selected_stream)) ]
 
 st.header('Display streams')
-st.write('Data Dimension: ' + str(df_selected_sector.shape[0]) + ' rows and ' + str(df_selected_sector.shape[1]) + ' columns.')
-st.dataframe(df_selected_sector[["stream","yyyymmdd","simdate"]])
+st.write('Data Dimension: ' + str(df_selected_stream.shape[0]) + ' rows and ' + str(df_selected_stream.shape[1]) + ' columns.')
+st.dataframe(df_selected_stream[["stream","yyyymmdd","simdate"]])
 
 
 def read_stream(stream,year,data):
@@ -88,14 +91,24 @@ def read_stream(stream,year,data):
                                 "Ndays": collect_data["Ndays"]})
     data_count = data_count.astype({"Ndays": int})
     return data_count
-def plot_domain(data,stream):
+def plot_domain(data,stream,date_range):
+    fig, ax = plt.subplots()
     #print(f"Checking stream {stream}")
     #figName = args.output_file
     #fig = plt.figure()
     dates=data['Dates'].tolist()
     #ax = plt.subplot(111)
-    plt.bar(data['Dates'].values,data['Ndays'].values,edgecolor=['k']*len(dates))
+    ax.bar(data['Dates'].values,data['Ndays'].values,edgecolor=['k']*len(dates))
+    plot_ini = date_range[0]#,'%Y/%m/%d')
+    plot_end = date_range[1]#,'%Y/%m/%d')
+    plt.xticks(rotation=40)
+    xfmt = md.DateFormatter('%Y%m%d')
+    ax.xaxis.set_major_formatter(xfmt)
+    ax.set_xlim([plot_ini, plot_end])
+    #Make damn axis integer
+    ax.yaxis.set_major_locator(MaxNLocator(integer=True))
     #ax.xaxis_date()
+    return st.pyplot(fig)
 
 
 
@@ -110,10 +123,16 @@ def price_plot(symbol):
   plt.ylabel('Closing Price', fontweight='bold')
   return st.pyplot()
 
-num_company = st.sidebar.slider('Number of Companies', 1, 5)
+#num_company = st.sidebar.slider('Number of Companies', 1, 5)
+#num_streams = st.sidebar.slider('Number of streams', 1,10)
+start_date = st.sidebar.date_input('start date', datetime(2019,3,26))
+end_date = st.sidebar.date_input('end date', datetime.today())
+
 
 if st.button('Show Plots'):
     st.header('Throughput')
-    for stream in df_selected_sector.stream:
-        data = read_stream(stream,2021,df)
-        plot_domain(stream,data)
+    for stream in selected_stream: #df_selected_stream.stream:
+        year = int(datetime.strftime(start_date,"%Y"))
+        df_plot = read_stream(stream,year,df)
+        date_range = [start_date,end_date]
+        plot_domain(df_plot,stream,date_range)
